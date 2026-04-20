@@ -428,18 +428,18 @@ header{position:sticky;top:0;z-index:100;background:rgba(13,17,23,.9);backdrop-f
 
 <script>
 const BANKS = [
-  {id:'jpmorgan', name:'JPMorgan Chase', q:'JP Morgan Chase'},
-  {id:'bofa',     name:'Bank of America', q:'Bank of America'},
-  {id:'wells',    name:'Wells Fargo', q:'Wells Fargo'},
-  {id:'citi',     name:'Citigroup', q:'Citibank'},
-  {id:'gs',       name:'Goldman Sachs', q:'Goldman Sachs'},
-  {id:'ms',       name:'Morgan Stanley', q:'Morgan Stanley'},
-  {id:'hsbc',     name:'HSBC', q:'HSBC'},
-  {id:'barclays', name:'Barclays', q:'Barclays'},
-  {id:'td',       name:'TD Bank', q:'TD Bank'},
-  {id:'usbank',   name:'U.S. Bank', q:'US Bank'},
-  {id:'pnc',      name:'PNC Bank', q:'PNC'},
-  {id:'capital',  name:'Capital One', q:'Capital One'},
+  {id:'jpmorgan', name:'JPMorgan Chase',  q:'JP Morgan Chase',  aliases:['jpmorgan','jp morgan','chase','j.p. morgan']},
+  {id:'bofa',     name:'Bank of America', q:'Bank of America',  aliases:['bank of america','bofa','boa']},
+  {id:'wells',    name:'Wells Fargo',     q:'Wells Fargo',      aliases:['wells fargo','wellsfargo']},
+  {id:'citi',     name:'Citigroup',       q:'Citibank',         aliases:['citi','citibank','citigroup']},
+  {id:'gs',       name:'Goldman Sachs',   q:'Goldman Sachs',    aliases:['goldman sachs','goldman']},
+  {id:'ms',       name:'Morgan Stanley',  q:'Morgan Stanley',   aliases:['morgan stanley']},
+  {id:'hsbc',     name:'HSBC',            q:'HSBC',             aliases:['hsbc']},
+  {id:'barclays', name:'Barclays',        q:'Barclays',         aliases:['barclays']},
+  {id:'td',       name:'TD Bank',         q:'TD Bank',          aliases:['td bank','td bank, n.a.','toronto-dominion']},
+  {id:'usbank',   name:'U.S. Bank',       q:'US Bank',          aliases:['u.s. bank','us bank','usbank','u.s. bancorp']},
+  {id:'pnc',      name:'PNC Bank',        q:'PNC',              aliases:['pnc','pnc bank','pnc financial']},
+  {id:'capital',  name:'Capital One',     q:'Capital One',      aliases:['capital one']},
 ];
 
 const SKILL_TERMS = ['AML','KYC','BSA','OFAC','Compliance','Auditing','Risk Management','CAMS','CFE','CPA',
@@ -591,21 +591,17 @@ async function doSearch(page = 1) {
 
 async function fetchJobs(page = 1) {
   const bankList = sel.size > 0 ? BANKS.filter(b=>sel.has(b.id)) : BANKS;
-  const loc = document.getElementById('loc').value.trim();
-  const isOr = searchMode === 'or';
-
-  // AND mode → 'what' param (all keywords must appear)
-  // OR  mode → 'what_or' param (any keyword can appear)
-  const kwParam   = isOr ? 'what_or' : 'what';
-  const kwValue   = kws.join(' ');
-  const broadKw   = isOr ? kws.join(' ') : kws.join(' ') + ' bank finance';
+  const loc      = document.getElementById('loc').value.trim();
+  const isOr     = searchMode === 'or';
+  const isFanOut = sel.size > 0 && sel.size <= 6;
 
   let allResults = [], totalCount = 0;
 
-  if (sel.size > 0 && sel.size <= 6) {
+  if (isFanOut && !isOr) {
+    // ── AND mode + specific banks: per-bank queries with company filter ──
+    // Adzuna supports what + company cleanly. Cap at 10 (free tier safe).
     for (const bank of bankList) {
-      const params = new URLSearchParams({ results_per_page: '20' });
-      params.set(kwParam, kwValue);
+      const params = new URLSearchParams({ results_per_page: '10', what: kws.join(' ') });
       if (loc) params.set('where', loc);
       params.set('company', bank.q);
 
@@ -619,25 +615,61 @@ async function fetchJobs(page = 1) {
       const d = await r.json();
       allResults.push(...(d.results||[]));
       totalCount += d.count || 0;
-      await delay(100);
+      await delay(120);
     }
-  } else {
-    const params = new URLSearchParams({ results_per_page: String(PAGE_SIZE), page: String(page) });
-    params.set(kwParam, broadKw);
+
+  } else if (isFanOut && isOr) {
+    // ── OR mode + specific banks: single broad what_or, filter client-side ──
+    // Adzuna rejects what_or + company together, so we search broadly
+    // and filter results by matching bank names ourselves.
+    const selectedAliases = bankList.flatMap(b => b.aliases || [b.q.toLowerCase()]);
+    const params = new URLSearchParams({
+      results_per_page: '50',
+      what_or: kws.join(' '),
+    });
     if (loc) params.set('where', loc);
 
     const r = await fetch(`/api/jobs?${params}`);
     if (!r.ok) {
       const e = await r.json().catch(()=>({error:`HTTP ${r.status}`}));
-      throw new Error(e.error || `HTTP ${r.status}`);
+      const err2 = new Error(e.error || `HTTP ${r.status}`);
+      err2.detail = e.detail || '';
+      throw err2;
     }
     const d = await r.json();
+    // Client-side filter: keep only jobs whose company name matches a selected bank
+    const raw = (d.results || []).filter(j => {
+      const co = (j.company?.display_name || '').toLowerCase();
+      return selectedAliases.some(alias => co.includes(alias));
+    });
+    allResults = raw.length > 0 ? raw : (d.results || []); // fallback: show all if no matches
+    totalCount  = allResults.length;
+
+  } else {
+    // ── Broad search (no banks, or >6 banks): server-side pagination ──
+    const kwParam = isOr ? 'what_or' : 'what';
+    const kwValue = isOr ? kws.join(' ') : kws.join(' ') + ' bank finance';
+    const params  = new URLSearchParams({ results_per_page: String(PAGE_SIZE), page: String(page) });
+    params.set(kwParam, kwValue);
+    if (loc) params.set('where', loc);
+
+    const r = await fetch(`/api/jobs?${params}`);
+    if (!r.ok) {
+      const e = await r.json().catch(()=>({error:`HTTP ${r.status}`}));
+      const err2 = new Error(e.error || `HTTP ${r.status}`);
+      err2.detail = e.detail || '';
+      throw err2;
+    }
+    const d  = await r.json();
     allResults = d.results || [];
-    totalCount  = d.count  || 0;
+    totalCount = d.count   || 0;
   }
 
   const seen = new Set();
-  const deduped = allResults.filter(r => { if(seen.has(String(r.id))) return false; seen.add(String(r.id)); return true; });
+  const deduped = allResults.filter(r => {
+    if (seen.has(String(r.id))) return false;
+    seen.add(String(r.id)); return true;
+  });
   return { jobs: deduped.map(mapJob), total: totalCount };
 }
 
