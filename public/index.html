@@ -447,8 +447,9 @@ const SKILL_TERMS = ['AML','KYC','BSA','OFAC','Compliance','Auditing','Risk Mana
   'Sanctions','Due Diligence','SOX','Internal Audit','CISA','FINRA','Anti-Fraud','FinCEN','FATF'];
 
 let sel = new Set(), kws = [], resumeText = '', resumeFile = null;
-let curFilter = 'all', allJobs = [], curPage = 1, totalResults = 0;
+let curFilter = 'all', allJobs = [], allJobsUnpaged = [], curPage = 1, totalResults = 0;
 let searchMode = 'and'; // 'and' | 'or'
+let fanOutMode = false;  // true = client-side pagination, false = server-side
 const PAGE_SIZE = 10;
 const activeChips = new Set();
 
@@ -553,19 +554,26 @@ async function doSearch(page = 1) {
   document.getElementById('err-area').innerHTML = '';
 
   try {
+    fanOutMode = sel.size > 0 && sel.size <= 6;
     const { jobs, total } = await fetchJobs(page);
     totalResults = total;
-    allJobs = jobs;
+    allJobsUnpaged = jobs; // keep full set for client-side paging
+    allJobs = fanOutMode ? jobs.slice(0, PAGE_SIZE) : jobs;
     setStep(2);
 
     if (jobs.length > 0 && (resumeText || resumeFile)) {
       setStep(3);
-      allJobs = await scoreJobs(jobs);
+      // Score only the first page's worth to keep prompt small
+      const toScore = fanOutMode ? allJobsUnpaged.slice(0, 12) : jobs.slice(0, 12);
+      const scored  = await scoreJobs(toScore);
+      // Merge scores back into full unpaged set
+      allJobsUnpaged = allJobsUnpaged.map(j => scored.find(s => s.id === j.id) || j);
+      allJobs = fanOutMode ? allJobsUnpaged.slice(0, PAGE_SIZE) : scored;
     }
 
     setStep(4);
     await delay(300);
-    renderResults(allJobs, total, page);
+    renderResults(allJobs, fanOutMode ? allJobsUnpaged.length : total, page);
   } catch(err) {
     console.error(err);
     document.getElementById('loading').style.display = 'none';
@@ -596,7 +604,7 @@ async function fetchJobs(page = 1) {
 
   if (sel.size > 0 && sel.size <= 6) {
     for (const bank of bankList) {
-      const params = new URLSearchParams({ results_per_page: '10' });
+      const params = new URLSearchParams({ results_per_page: '20' });
       params.set(kwParam, kwValue);
       if (loc) params.set('where', loc);
       params.set('company', bank.q);
@@ -680,7 +688,9 @@ async function scoreJobs(jobs) {
   });
   if (!r.ok) {
     const e = await r.json().catch(()=>({}));
-    throw new Error(e.error || `Match API error ${r.status}`);
+    const err = new Error(e.error || `Match API error ${r.status}`);
+    err.detail = e.detail || '';
+    throw err;
   }
   const { results: arr } = await r.json();
   return jobs.map(j => {
@@ -743,19 +753,27 @@ function buildCards(jobs) {
 function buildPagination(total, page) {
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const pg = document.getElementById('pagination');
-  // Hide pagination only when doing per-bank fan-out (≤6 banks selected)
-  // For broad searches (no selection or >6 banks), always show pagination
-  const isFanOut = sel.size > 0 && sel.size <= 6;
-  if (totalPages <= 1 || isFanOut) { pg.style.display='none'; return; }
+  if (totalPages <= 1) { pg.style.display = 'none'; return; }
   pg.style.display = 'flex';
   document.getElementById('prev-btn').disabled = page <= 1;
   document.getElementById('next-btn').disabled = page >= totalPages;
-  document.getElementById('page-info').textContent = `Page ${page} of ${totalPages.toLocaleString()}`;
+  const modeLabel = fanOutMode ? ' · client paged' : '';
+  document.getElementById('page-info').textContent = `Page ${page} of ${totalPages.toLocaleString()}${modeLabel}`;
 }
 
 function changePage(dir) {
-  doSearch(curPage + dir);
-  document.querySelector('.main').scrollTo(0, 0);
+  const newPage = curPage + dir;
+  if (fanOutMode) {
+    // Client-side pagination — just re-slice allJobsUnpaged
+    curPage = newPage;
+    const start = (newPage - 1) * PAGE_SIZE;
+    allJobs = allJobsUnpaged.slice(start, start + PAGE_SIZE);
+    renderResults(allJobs, allJobsUnpaged.length, newPage);
+  } else {
+    // Server-side pagination — re-query Adzuna
+    doSearch(newPage);
+  }
+  document.querySelector('.main').scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function jobCard(j, i) {
