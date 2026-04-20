@@ -82,12 +82,13 @@ header{position:sticky;top:0;z-index:100;background:rgba(13,17,23,.9);backdrop-f
 .chip.on{background:var(--primary-cont);border-color:var(--primary-cont);color:var(--on-primary-cont)}
 
 /* AND/OR TOGGLE */
-.search-mode{display:flex;align-items:center;gap:0;background:var(--surf);border:1.5px solid var(--ol);border-radius:var(--r-full);padding:3px;width:100%}
-.mode-btn{flex:1;padding:7px 10px;border:none;border-radius:var(--r-full);cursor:pointer;font-family:var(--font);font-size:12px;font-weight:600;transition:all .22s;background:transparent;color:var(--on-surf-var);display:flex;align-items:center;justify-content:center;gap:5px;letter-spacing:.3px}
-.mode-btn .mi{font-size:14px}
-.mode-btn.active-and{background:var(--primary-cont);color:var(--on-primary-cont)}
-.mode-btn.active-or{background:rgba(78,204,163,.18);color:var(--high)}
-.mode-desc{font-size:11px;color:var(--on-surf-var);line-height:1.4;padding:6px 2px 0}
+.search-mode{display:flex;align-items:center;gap:6px;width:100%}
+.mode-btn{flex:1;padding:10px 8px;border:2px solid var(--ol);border-radius:var(--r-md);cursor:pointer;font-family:var(--font);font-size:12px;font-weight:600;transition:all .22s;background:var(--surf-hi);color:var(--on-surf-var);display:flex;align-items:center;justify-content:center;gap:5px;letter-spacing:.3px}
+.mode-btn .mi{font-size:15px}
+.mode-btn:hover{border-color:var(--ol);color:var(--on-surf);background:var(--surf-top)}
+.mode-btn.active-and{background:var(--primary);border-color:var(--primary);color:var(--on-primary);box-shadow:0 0 12px rgba(146,203,255,.25)}
+.mode-btn.active-or{background:var(--high);border-color:var(--high);color:#003322;box-shadow:0 0 12px rgba(78,204,163,.25)}
+.mode-desc{font-size:11px;color:var(--on-surf-var);line-height:1.4;padding:5px 2px 0}
 .mode-desc span{font-weight:600;color:var(--on-surf)}
 
 /* BANKS */
