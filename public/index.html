@@ -467,15 +467,11 @@ function init() {
 }
 
 async function checkStatus() {
+async function checkStatus() {
   try {
-    const r = await fetch('/api/jobs?what=test&results_per_page=1');
-    // Even a 400 means the proxy is up; 500 means env vars missing
-    if (r.status === 500) {
-      const d = await r.json();
-      setStatus(false, 'Env vars not set');
-    } else {
-      setStatus(true, 'Adzuna Connected');
-    }
+    const r = await fetch('/api/jobs?ping=1');
+    const d = await r.json().catch(()=>({}));
+    setStatus(d.ok === true, d.ok ? 'Adzuna Connected' : 'Adzuna Error — check API keys');
   } catch {
     setStatus(false, 'Proxy unreachable');
   }
@@ -580,7 +576,7 @@ async function doSearch(page = 1) {
     document.getElementById('err-area').innerHTML = `
       <div class="err-card">
         <span class="mi">error_outline</span>
-        <div class="err-text"><strong>Search failed</strong>${err.message||'Please try again.'}</div>
+        <div class="err-text"><strong>Search failed</strong>${err.message||'Please try again.'}${err.detail?`<br><small style="opacity:.65">${err.detail}</small>`:''}</div>
       </div>`;
   }
 }
@@ -608,7 +604,9 @@ async function fetchJobs(page = 1) {
       const r = await fetch(`/api/jobs?${params}`);
       if (!r.ok) {
         const e = await r.json().catch(()=>({error:`HTTP ${r.status}`}));
-        throw new Error(e.error || `HTTP ${r.status}`);
+        const err2 = new Error(e.error || `HTTP ${r.status}`);
+        err2.detail = e.detail || '';
+        throw err2;
       }
       const d = await r.json();
       allResults.push(...(d.results||[]));
