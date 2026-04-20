@@ -1,0 +1,6 @@
+{
+  "name": "banktrack",
+  "version": "1.0.0",
+  "description": "Live bank job search with resume matching",
+  "private": true
+}
